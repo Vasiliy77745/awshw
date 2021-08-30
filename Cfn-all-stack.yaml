@@ -1,0 +1,242 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: "Network: VPC, Subnets"
+
+Metadata:
+ AWS::CloudFormation::Interface:
+    ParameterGroups:
+      -
+        Label:
+          default: "Network Configuration"
+        Parameters:
+          - Environment
+          - VPCBlock
+      -
+        Label:
+          default: "Subnets CIDR Blocks"
+        Parameters:
+          - PublicSubnetACIDR
+          - PublicSubnetBCIDR
+          - PublicSubnetCCIDR
+Parameters:
+  Environment:
+    Type: String
+    Default: "VPC"
+
+  VPCBlock:
+    Type: String
+    Default: '10.0.0.0/16'
+
+  PublicSubnetACIDR:
+    Type: String
+    Default: '10.0.10.0/24'
+    Description: "Public Subnet-A CIDR"
+
+  PublicSubnetBCIDR:
+    Type: String
+    Default: '10.0.20.0/24'
+    Description: "Public Subnet-B CIDR"
+
+  PublicSubnetCCIDR:
+    Type: String
+    Default: '10.0.30.0/24'
+    Description: "Public Subnet-C CIDR"
+
+
+Resources:
+#============= VPC ==================
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VPCBlock
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Ref Environment
+
+#============ ALL Subnets ======================================================
+  PublicSubnetA:
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [ 0, "Fn::GetAZs": { Ref: "AWS::Region" } ]
+      CidrBlock: !Ref "PublicSubnetACIDR"
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Join [ "", [ !Ref Environment, "-Public-A" ] ]
+
+  PublicSubnetB:
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [ 1, "Fn::GetAZs": { Ref: "AWS::Region" } ]
+      CidrBlock: !Ref "PublicSubnetBCIDR"
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Join [ "", [ !Ref Environment, "-Public-B" ] ]
+
+  PublicSubnetC:
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [ 2, "Fn::GetAZs": { Ref: "AWS::Region" } ]
+      CidrBlock: !Ref "PublicSubnetCCIDR"
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Join [ "", [ !Ref Environment, "-Public-C" ] ]
+          
+          
+#++++++++++++++++++++++++++++++=Security group++++++++++++++++++++++++++++++++++++++++
+  InstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow ssh to client host
+      VpcId:
+         Ref: VPC
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 22
+        ToPort: 22
+        CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+      - IpProtocol: -1
+        CidrIp: 0.0.0.0/0
+
+  EFSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow EFS mount
+      VpcId:
+         Ref: VPC
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 2049
+        ToPort: 2049
+        SourceSecurityGroupId: 
+          Ref: InstanceSecurityGroup
+      SecurityGroupEgress:
+      - IpProtocol: -1
+        CidrIp: 0.0.0.0/0
+        
+        
+#====== Internet Gateway =======
+  GatewayInternet:
+    Type: "AWS::EC2::InternetGateway"
+    Properties: 
+      Tags:
+        - Key: Name
+          Value: !Ref Environment
+
+  GatewayAttachmentInternet:                       # Attachment IGW to VPC
+    Type: "AWS::EC2::VPCGatewayAttachment"
+    Properties:
+      VpcId:  !Ref VPC
+      InternetGatewayId: !Ref GatewayInternet
+        
+        
+#====== Public RouteTables =========	  
+  RouteTableForPublicSubnet:                       # Creation of Empty Route Table
+    Type: "AWS::EC2::RouteTable"                    
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Join [ " ", [ !Ref Environment, "PublicRouteTable" ] ]
+
+          
+  RoutesForPublicRouteTable:                     # Creation and Attachment of Routes for Route Table
+    Type: "AWS::EC2::Route"
+    DependsOn: GatewayAttachmentInternet
+    Properties: 
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: GatewayInternet
+      RouteTableId:
+        Ref: RouteTableForPublicSubnet
+        
+  RouteTableAssociationSubnetA:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      RouteTableId: 
+        Ref: RouteTableForPublicSubnet
+      SubnetId:
+        Ref: PublicSubnetA
+      
+      
+  MyEC2Instance1: 
+    Type: AWS::EC2::Instance
+    Properties: 
+      ImageId: "ami-0c2b8ca1dad447f8a"
+      KeyName: "Alex-key-Virginia"
+      InstanceType: t2.micro
+      SubnetId:
+        Ref: PublicSubnetA
+      SecurityGroupIds:
+        - Ref: InstanceSecurityGroup 
+      BlockDeviceMappings: 
+      - DeviceName: "/dev/sdm"
+        Ebs: 
+          #VolumeType: "io1"
+          #Iops: "200"
+          DeleteOnTermination: "true"
+          VolumeSize: "8"
+      #- DeviceName: "/dev/sdk"
+        
+        #NoDevice: {} 
+        
+  MyEC2Instance2: 
+    Type: AWS::EC2::Instance
+    Properties: 
+      ImageId: "ami-0c2b8ca1dad447f8a"
+      KeyName: "Alex-key-Virginia"
+      InstanceType: t2.micro
+      SubnetId:
+        Ref: PublicSubnetA
+      SecurityGroupIds:
+        - Ref: InstanceSecurityGroup 
+      BlockDeviceMappings: 
+      - DeviceName: "/dev/sdm"
+        Ebs: 
+          #VolumeType: "io1"
+          #Iops: "200"
+          DeleteOnTermination: "true" # delete with instancr
+          VolumeSize: "8"
+      - DeviceName: "/dev/sdn"
+        Ebs: 
+          #VolumeType: "io1"
+          #Iops: "200"
+          DeleteOnTermination: "true"
+          VolumeSize: "8"
+      #- DeviceName: "/dev/sdk"
+    #NoDevice: {} 
+    
+
+    #========================EFS=========================================
+  
+  MyEFS:   
+    Type: AWS::EFS::FileSystem
+    Properties: 
+      
+      #BackupPolicy: 
+    #BackupPolicy
+  #BypassPolicyLockoutSafetyCheck: Boolean
+      Encrypted: false
+      
+      
+  MyEFSMountTarget:
+    Type: AWS::EFS::MountTarget
+    Properties: 
+      FileSystemId:
+        Ref: MyEFS
+      SecurityGroups: 
+        - Ref: EFSSecurityGroup
+      SubnetId:
+        Ref: PublicSubnetA 
+
+
+
+
+

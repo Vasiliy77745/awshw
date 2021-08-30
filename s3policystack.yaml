@@ -1,0 +1,14 @@
+Resources:
+  SampleBucketPolicy:
+    Type: 'AWS::S3::BucketPolicy'
+    Properties:
+      Bucket: myaavbucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action: 
+              - 's3:GetObject'
+            Effect: Deny
+            Resource: 'arn:aws:s3:::myaavbucket/private_file.txt'
+            Principal: 
+              AWS: 'arn:aws:iam::084825854587:user/homeworkchecker'
